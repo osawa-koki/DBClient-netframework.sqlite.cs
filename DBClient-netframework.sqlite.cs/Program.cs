@@ -1,63 +1,177 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Data.SQLite;
+using System.Runtime.Serialization;
 
-namespace DBClient_netframework.sqlite.cs
+internal class DBClient
 {
-  internal class Program
+  private static string db_name;
+  private string sql = "";
+  private readonly List<Tuple<string, object>> parameters = new List<Tuple<string, object>>();
+
+  internal static void Init(string dbname)
   {
-    static void Main(string[] args)
+    db_name = dbname;
+  }
+
+  internal void Add(string _sql)
+  {
+    sql += $" {_sql} ";
+  }
+
+  internal void AddParam(string key, object data)
+  {
+    parameters.Add(new Tuple<string, object>(key, data));
+  }
+
+  internal Dictionary<string, object> Select()
+  {
+    if (db_name == null)
     {
-      // テーブルの初期化
-      DBClient.Init("test.db");
-
-      // テーブルの作成
-      {
-        DBClient client = new DBClient();
-        client.Add("CREATE TABLE IF NOT EXISTS helloworld(");
-        client.Add("  number INTEGER PRIMARY KEY AUTOINCREMENT,");
-        client.Add("  comment VARCHAR(100) NULL");
-        client.Add(");");
-        try
-        {
-          client.Execute();
-        }
-        catch
-        {
-          // スルー
-        }
-      }
-
-      // 新規コメントの追加
-      {
-        Console.Write("comment -> ");
-        var new_comment = Console.ReadLine()?.Trim() ?? "";
-
-        DBClient client = new DBClient();
-        client.Add("INSERT INTO helloworld(comment)");
-        client.Add("VALUES(@comment);");
-        client.AddParam("@comment", new_comment);
-        client.Execute();
-
-      }
-
-      // コメントの取得
-      {
-        DBClient client = new DBClient();
-        client.Add("SELECT number, comment");
-        client.Add("FROM helloworld");
-        var result = client.SelectAll();
-        foreach (var record in result)
-        {
-          foreach (var column in record)
-          {
-            Console.Write($"{column.Key} -> {column.Value}   |   ");
-          }
-          Console.WriteLine();
-        }
-      }
+      throw new Exception("使用するデータベースを指定してください。");
     }
+
+    SQLiteConnectionStringBuilder sqlConnectionSb = new SQLiteConnectionStringBuilder() { DataSource = db_name };
+
+    var connection = new SQLiteConnection(sqlConnectionSb.ToString());
+    connection.Open();
+
+    var cmd = new SQLiteCommand(connection)
+    {
+      CommandText = sql
+    };
+
+    foreach (var parameter in parameters)
+    {
+      cmd.Parameters.Add(new SQLiteParameter(parameter.Item1, parameter.Item2));
+    }
+
+    Dictionary<string, object> result = new Dictionary<string, object>();
+
+    var reader = cmd.ExecuteReader();
+
+    if (!reader.HasRows)
+    {
+      return null;
+    }
+
+    reader.Read();
+    for (int i = 0; i < reader.FieldCount; i++)
+    {
+      result[reader.GetFieldValue<string>(i)] = reader.GetValue(i);
+    }
+
+    Reset();
+
+    reader.Close();
+    connection.Close();
+
+    return result;
+  }
+
+
+  internal List<Dictionary<string, object>> SelectAll()
+  {
+    if (db_name == null)
+    {
+      throw new Exception("使用するデータベースを指定してください。");
+    }
+
+    SQLiteConnectionStringBuilder sqlConnectionSb = new SQLiteConnectionStringBuilder() { DataSource = db_name };
+
+    var connection = new SQLiteConnection(sqlConnectionSb.ToString());
+    connection.Open();
+
+    var cmd = new SQLiteCommand(connection)
+    {
+      CommandText = sql
+    };
+
+    foreach (var parameter in parameters)
+    {
+      cmd.Parameters.Add(new SQLiteParameter(parameter.Item1, parameter.Item2));
+    }
+
+    List<Dictionary<string, object>> result = new List<Dictionary<string, object>>();
+
+    var reader = cmd.ExecuteReader();
+    while (reader.Read())
+    {
+      Dictionary<string, object> tmp_result = new Dictionary<string, object>();
+      for (int i = 0; i < reader.FieldCount; i++)
+      {
+        tmp_result[reader.GetName(i)] = reader.GetValue(i);
+      }
+      result.Add(tmp_result);
+    }
+    Reset();
+
+    reader.Close();
+    connection.Close();
+
+    return result;
+  }
+
+
+  internal void Execute()
+  {
+    if (db_name == null)
+    {
+      throw new Exception("使用するデータベースを指定してください。");
+    }
+
+    SQLiteConnectionStringBuilder sqlConnectionSb = new SQLiteConnectionStringBuilder() { DataSource = db_name };
+
+    var connection = new SQLiteConnection(sqlConnectionSb.ToString());
+    connection.Open();
+
+    var cmd = new SQLiteCommand(connection)
+    {
+      CommandText = sql
+    };
+
+    foreach (var parameter in parameters)
+    {
+      cmd.Parameters.Add(new SQLiteParameter(parameter.Item1, parameter.Item2));
+    }
+
+    if (cmd.ExecuteNonQuery() == 0)
+    {
+      throw new DBNoRecordAffectedException("having no record to execute the query specified.");
+    }
+    Reset();
+
+    connection.Close();
+
+    return;
+  }
+
+  private void Reset()
+  {
+    sql = "";
+    parameters.Clear();
   }
 }
+
+internal class DBNoRecordAffectedException : Exception
+{
+  public DBNoRecordAffectedException()
+  : base()
+  {
+  }
+
+  public DBNoRecordAffectedException(string message)
+      : base(message)
+  {
+  }
+
+  public DBNoRecordAffectedException(string message, Exception innerException)
+      : base(message, innerException)
+  {
+  }
+
+  protected DBNoRecordAffectedException(SerializationInfo info, StreamingContext context)
+      : base(info, context)
+  {
+  }
+ }
